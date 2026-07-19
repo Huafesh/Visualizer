@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trap Nation Visualizer - Estilo Real</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: #000; overflow: hidden; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        #canvas1 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #interface { 
+            position: absolute; z-index: 10; text-align: center; 
+            background: rgba(0,0,0,0.7); padding: 30px; border-radius: 15px; color: white;
+            backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.2);
+        }
+        .hidden { display: none !important; }
+        .btn { display: inline-block; margin-top: 20px; padding: 10px 30px; background: #ff0055; color: white; border-radius: 25px; cursor: pointer; font-family: sans-serif; font-weight: bold;}
+        #audioPlayer { position: absolute; bottom: 20px; z-index: 20; width: 300px; opacity: 0.5; transition: opacity 0.3s;}
+        #audioPlayer:hover { opacity: 1; }
+    </style>
+</head>
+<body>
+
+    <div id="interface">
+        <h1 style="font-family: sans-serif; letter-spacing: 2px;">TRAP NATION STYLE</h1>
+        <p style="font-family: sans-serif; margin-top: 10px; opacity: 0.8;">Sube tu música</p>
+        <input type="file" id="fileInput" accept="audio/*" style="display:none">
+        <label for="fileInput" class="btn">Elegir Archivo</label>
+    </div>
+
+    <canvas id="canvas1"></canvas>
+    <audio id="audioPlayer" controls></audio>
+
+    <script>
+        // --- CONFIGURACIÓN ---
+        const canvas = document.getElementById('canvas1');
+        const ctx = canvas.getContext('2d');
+        const fileInput = document.getElementById('fileInput');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const interfaceDiv = document.getElementById('interface');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let audioContext, analyser, dataArray, bufferLength;
+        let isActive = false;
+        
+        // --- CARGA DE IMÁGENES (LOGO Y FONDO) ---
+        const logoImage = new Image();
+        logoImage.src = 'logo.jpg'; // ASEGÚRATE QUE ESTE ARCHIVO EXISTA
+        let logoReady = false;
+        logoImage.onload = () => logoReady = true;
+
+        const bgImage = new Image();
+        bgImage.src = 'fondo.jpg'; // ASEGÚRATE QUE ESTE ARCHIVO EXISTA (para las montañas)
+        let bgReady = false;
+        bgImage.onload = () => bgReady = true;
+
+        // --- AUDIO INICIO ---
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            audioPlayer.src = URL.createObjectURL(file);
+            audioPlayer.load();
+            audioPlayer.play()
+                .then(() => {
+                    if (!isActive) {
+                        setupAudio();
+                        interfaceDiv.classList.add('hidden');
+                        initParticles();
+                        isActive = true;
+                        animate();
+                    }
+                })
+                .catch(err => alert("Error al reproducir: " + err));
+        });
+
+        function setupAudio() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new AudioContext();
+            const src = audioContext.createMediaElementSource(audioPlayer);
+            analyser = audioContext.createAnalyser();
+            // Usamos 512 para tener más puntos y que el círculo sea más suave
+            analyser.fftSize = 512; 
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            src.connect(analyser);
+            analyser.connect(audioContext.destination);
+        }
+
+        // --- PARTÍCULAS (Atmósfera) ---
+        let particles = [];
+        class Particle {
+            constructor() {
+                this.reset();
+                this.y = Math.random() * canvas.height; // Posición inicial aleatoria
+            }
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height + Math.random() * 100; // Empiezan desde abajo
+                this.color = `rgba(255, 255, 255, ${Math.random() * 0.3 + 0.1})`;
+                this.size = Math.random() * 2 + 0.5;
+                this.speedY = Math.random() * 1 + 0.5;
+            }
+            update(bass) {
+                this.y -= this.speedY * (1 + bass * 2); // Suben más rápido con el bajo
+                if (this.y < 0) this.reset(); // Reiniciar si salen por arriba
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        function initParticles() {
+            for(let i=0; i<100; i++) particles.push(new Particle());
+        }
+
+        // --- BUCLE PRINCIPAL (LA MAGIA VISUAL) ---
+        function animate() {
+            // 1. Dibujar Fondo
+            if (bgReady) {
+                // Dibujamos la imagen de fondo estirada
+                ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+                // Capa oscura encima para que el visualizador resalte
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                // Si no hay imagen de fondo, usar negro
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if (!isActive || !analyser) {
+                requestAnimationFrame(animate);
+                return;
+            }
+
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Calcular fuerza del bajo para el "punch"
+            let bass = dataArray.slice(0, 10).reduce((a,b)=>a+b) / 10 / 255;
+
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            // El radio base pulsa con la música
+            const baseRadius = 120 + (bass * 40); 
+
+            // 2. Dibujar Partículas
+            particles.forEach(p => { p.update(bass); p.draw(); });
+
+            // 3. --- DIBUJAR EL ESPECTRO ESTILO TRAP NATION ---
+            ctx.save();
+            ctx.translate(cx, cy);
+            
+            // Definir el estilo de Glow (Resplandor)
+            ctx.shadowBlur = 30 + (bass * 20); // El glow crece con el bajo
+            ctx.shadowColor = 'rgba(255, 50, 150, 0.8)'; // Color rosado/morado del glow
+
+            // Crear el degradado radial (Blanco -> Amarillo -> Rosa -> Transparente)
+            // El gradiente debe ser más grande que el radio máximo alcanzado por el audio
+            let gradient = ctx.createRadialGradient(0, 0, baseRadius * 0.8, 0, 0, baseRadius * 2.5);
+            gradient.addColorStop(0, 'white');
+            gradient.addColorStop(0.4, 'yellow');
+            gradient.addColorStop(0.7, 'magenta');
+            gradient.addColorStop(1, 'purple');
+            ctx.fillStyle = gradient;
+
+            // Comenzar a dibujar la forma continua
+            ctx.beginPath();
+            // Usamos unos 180 puntos para que sea muy suave
+            const totalPoints = 180; 
+            for (let i = 0; i < totalPoints; i++) {
+                // Mapeamos los puntos al array de audio (usamos la primera mitad que son graves/medios)
+                let audioIndex = Math.floor(map(i, 0, totalPoints, 0, bufferLength / 2));
+                let audioValue = dataArray[audioIndex] || 0;
+
+                // Calculamos la altura de la onda en este punto
+                // (audioValue / 255) es un valor entre 0 y 1. Multiplicamos por 100 para la altura máxima.
+                let offset = (audioValue / 255) * 100 * (1 + bass);
+                let r = baseRadius + offset;
+                
+                // Trigonometría para encontrar el punto (x, y) en el círculo
+                let angle = map(i, 0, totalPoints, 0, Math.PI * 2);
+                let x = r * Math.cos(angle);
+                let y = r * Math.sin(angle);
+
+                if (i === 0) {
+                    ctx.moveTo(x, y); // Primer punto
+                } else {
+                    ctx.lineTo(x, y); // Conectar con líneas suaves
+                }
+            }
+            ctx.closePath(); // Cerrar el círculo
+            ctx.fill(); // Rellenar con el gradiente y aplicar el glow
+            ctx.restore();
+
+
+            // 4. Dibujar Círculo Central y Logo
+            ctx.save();
+            ctx.translate(cx, cy);
+            
+            // Círculo negro de fondo para el logo (tapa el agujero del espectro)
+            ctx.beginPath();
+            ctx.arc(0, 0, baseRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+            
+            // Borde blanco fino alrededor del logo
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'white';
+            ctx.stroke();
+
+            if (logoReady) {
+                ctx.beginPath();
+                ctx.arc(0, 0, baseRadius - 5, 0, Math.PI * 2); // Un poco más pequeño que el borde
+                ctx.clip();
+                // Dibujar logo un poco más grande para asegurar que cubra todo
+                ctx.drawImage(logoImage, -baseRadius, -baseRadius, baseRadius * 2, baseRadius * 2);
+            }
+            ctx.restore();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Función de utilidad para mapear valores
+        function map(value, start1, stop1, start2, stop2) {
+            return start2 + (stop2 - start2) * ((value - start1) / (stop1 - start1));
+        }
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
